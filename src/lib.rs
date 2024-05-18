@@ -1,8 +1,11 @@
-use std::{fmt, process::id, thread};
+use std::{fmt, sync::{mpsc, Arc, Mutex}, thread};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
 }
+
+struct Job;
 
 impl ThreadPool {
     /// Create a new ThreadPool.
@@ -14,19 +17,19 @@ impl ThreadPool {
     pub fn new(size: usize) -> ThreadPool {
         assert!(size > 0);
 
-        let workers = create_workers(size);
+        let (workers, sender) = create_workers(size);
 
-        ThreadPool { workers }
+        ThreadPool { workers, sender }
     }
 
     /// Create a new ThreadPool.
     /// 
     /// size: The number of threads in the pool. If the size is zero, return PoolCreationError.
     pub fn build(size: usize) -> Result<ThreadPool, PoolCreationError> {
-        let workers = create_workers(size);
+        let (workers, sender) = create_workers(size);
 
         if size > 0 {
-            Ok(ThreadPool { workers })
+            Ok(ThreadPool { workers, sender })
         } else {
             Err(PoolCreationError)
         }
@@ -44,22 +47,26 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(id: usize) -> Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         // `thread::spawn` will panic if the os doesn't have enough resources to create a new thread.
         // Therefore, use std::thread::Builder to create a new thread in the real word.
-        let thread = thread::spawn(|| {});
+        let thread = thread::spawn(|| {
+            receiver;
+        });
 
         Worker { id, thread }
     }
 }
 
-fn create_workers(size: usize) -> Vec<Worker> {
+fn create_workers(size: usize) -> (Vec<Worker>, mpsc::Sender<Job>) {
+    let (sender, receiver) = mpsc::channel();
+    let receiver = Arc::new(Mutex::new(receiver));
     let mut workers = Vec::with_capacity(size);
     for id in 0..size {
-        workers.push(Worker::new(id));
+        workers.push(Worker::new(id, Arc::clone(&receiver)));
     }
 
-    workers
+    (workers, sender)
 }
 pub struct PoolCreationError;
 
