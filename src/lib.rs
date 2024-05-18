@@ -53,8 +53,11 @@ impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         // `thread::spawn` will panic if the os doesn't have enough resources to create a new thread.
         // Therefore, use std::thread::Builder to create a new thread in the real word.
-        let thread = thread::spawn(|| {
-            receiver;
+        let thread = thread::spawn(move || loop {
+            println!("Worker {} got a job; executing.", id);
+            let job = receiver.lock().unwrap().recv().unwrap();
+
+            job();
         });
 
         Worker { id, thread }
