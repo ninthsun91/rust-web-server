@@ -2,7 +2,7 @@ use std::{fmt, sync::{mpsc, Arc, Mutex}, thread};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: Option<mpsc::Sender<Job>>,
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -19,7 +19,10 @@ impl ThreadPool {
 
         let (workers, sender) = create_workers(size);
 
-        ThreadPool { workers, sender }
+        ThreadPool {
+            workers,
+            sender: Some(sender),
+        }
     }
 
     /// Create a new ThreadPool.
@@ -29,7 +32,10 @@ impl ThreadPool {
         let (workers, sender) = create_workers(size);
 
         if size > 0 {
-            Ok(ThreadPool { workers, sender })
+            Ok(ThreadPool {
+                workers,
+                sender: Some(sender),
+            })
         } else {
             Err(PoolCreationError)
         }
@@ -40,12 +46,14 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
     }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
+        drop(self.sender.take());
+
         for worker in &mut self.workers {
             println!("Shutting down worker {}", worker.id);
 
@@ -66,10 +74,18 @@ impl Worker {
         // `thread::spawn` will panic if the os doesn't have enough resources to create a new thread.
         // Therefore, use std::thread::Builder to create a new thread in the real word.
         let thread = thread::spawn(move || loop {
-            println!("Worker {} got a job; executing.", id);
-            let job = receiver.lock().unwrap().recv().unwrap();
+            let message = receiver.lock().unwrap().recv();
 
-            job();
+            match message {
+                Ok(job) => {
+                    println!("Worker {} got a job; executing.", id);
+                    job();
+                }
+                Err(_) => {
+                    println!("Worker {} disconnected. shuttind down.", id);
+                    break;
+                }
+            }
         });
 
         Worker {
